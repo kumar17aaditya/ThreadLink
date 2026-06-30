@@ -1,0 +1,13 @@
+# Compiled C++ executables
+server
+client
+
+# Object files
+*.o
+
+# IDE-specific directories
+.vscode/
+
+# Common OS-specific files
+.DS_Store
+Thumbs.db

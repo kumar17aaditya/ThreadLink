@@ -1,30 +1,34 @@
-import type { ConnectionSettings } from "@/types/chat";
+/**
+ * The gateway address is internal configuration, not something the
+ * person using ThreadLink should ever see or type in -- see the
+ * login screen, which only asks for a username and password. It's
+ * sourced from a build-time env var so a real deployment can point
+ * at its own gateway without exposing that detail in the UI.
+ */
+const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL?.trim() || "ws://127.0.0.1:8081";
 
-const STORAGE_KEY = "threadlink.connection";
+export function getGatewayUrl(): string {
+  return GATEWAY_URL;
+}
 
-const DEFAULT_GATEWAY = "ws://127.0.0.1:8081";
+const USERNAME_STORAGE_KEY = "threadlink.lastUsername";
 
-export function loadConnectionSettings(): ConnectionSettings {
-  if (typeof window === "undefined") {
-    return { gatewayUrl: DEFAULT_GATEWAY, nickname: "" };
-  }
-
+/** Convenience only: pre-fills the username field on the login
+ * screen. The password is never persisted anywhere on the client. */
+export function loadLastUsername(): string {
+  if (typeof window === "undefined") return "";
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return { gatewayUrl: DEFAULT_GATEWAY, nickname: "" };
-    }
-    const parsed = JSON.parse(raw) as Partial<ConnectionSettings>;
-    return {
-      gatewayUrl: parsed.gatewayUrl?.trim() || DEFAULT_GATEWAY,
-      nickname: parsed.nickname?.trim() || "",
-    };
+    return window.localStorage.getItem(USERNAME_STORAGE_KEY)?.trim() ?? "";
   } catch {
-    return { gatewayUrl: DEFAULT_GATEWAY, nickname: "" };
+    return "";
   }
 }
 
-export function saveConnectionSettings(settings: ConnectionSettings): void {
+export function saveLastUsername(username: string): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  try {
+    window.localStorage.setItem(USERNAME_STORAGE_KEY, username);
+  } catch {
+    /* localStorage unavailable (private browsing, quota, etc.) -- not fatal */
+  }
 }

@@ -26,8 +26,7 @@ export function Sidebar({ mobile = false }: SidebarProps) {
   const {
     state,
     onlineUsers,
-    disconnect,
-    connect,
+    logout,
     selectConversation,
     startDirectConversation,
     openPublicConversation,
@@ -106,7 +105,11 @@ export function Sidebar({ mobile = false }: SidebarProps) {
           <SidebarSection title="Direct Messages">
             {directConversations.map((c) => {
               const peer = c.peerId ? state.users[c.peerId] : undefined;
-              const label = peer?.nickname ?? "Offline user";
+              // Same fallback order as ChatProvider's activeConversation
+              // memo: live nickname if online, else the gateway-resolved
+              // persisted title (set for restored conversations), else
+              // a last-resort placeholder.
+              const label = peer?.nickname || c.title || "Offline user";
               return (
                 <SidebarRow
                   key={c.id}
@@ -202,7 +205,7 @@ export function Sidebar({ mobile = false }: SidebarProps) {
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-white">{state.nickname || "Guest"}</p>
-            <p className="truncate text-xs text-zinc-500">{state.settings.gatewayUrl}</p>
+            <ConnectionStatusBadge status={state.connectionStatus} />
           </div>
           <button
             type="button"
@@ -240,26 +243,15 @@ export function Sidebar({ mobile = false }: SidebarProps) {
           </button>
         </div>
 
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          {!isConnected ? (
-            <button
-              type="button"
-              onClick={() => connect()}
-              className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50"
-            >
-              <Plug className="h-3.5 w-3.5" />
-              Reconnect
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={disconnect}
-              className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300 transition hover:bg-red-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              Disconnect
-            </button>
-          )}
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={logout}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300 transition hover:bg-red-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            Sign out
+          </button>
         </div>
       </div>
     </aside>

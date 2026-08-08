@@ -10,6 +10,7 @@ function ready(state: ChatState, userId: string, username: string, extraUsers: {
     username,
     users: [{ id: userId, username, presence: "online" }, ...extraUsers.map((u) => ({ ...u, presence: "online" as const }))],
     conversations: [],
+    messages: [],
   });
 }
 
@@ -176,9 +177,61 @@ test("ERROR_MESSAGE appends a visible error message into the target conversation
   assert.equal(state.lastError, "That user is not currently online.");
 });
 
-test("RESET_CHAT clears identity/users/conversations back to just public", () => {
+test("READY restores message history into the correct conversations", () => {
+  const state = chatReducer(createInitialState(), {
+    type: "READY",
+    userId: "u1",
+    username: "alice",
+    users: [
+      { id: "u1", username: "alice", presence: "online" },
+      { id: "u2", username: "bob", presence: "online" },
+    ],
+    conversations: [{ id: "direct:u1:u2", kind: "direct", title: "", memberIds: ["u1", "u2"] }],
+    messages: [
+      {
+        id: "m1",
+        conversationId: PUBLIC_CONVERSATION_ID,
+        kind: "chat",
+        senderId: "u2",
+        senderUsername: "bob",
+        text: "welcome back",
+        timestamp: new Date().toISOString(),
+      },
+      {
+        id: "m2",
+        conversationId: "direct:u1:u2",
+        kind: "chat",
+        senderId: "u2",
+        senderUsername: "bob",
+        text: "missed you",
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  });
+  assert.equal(state.conversations[PUBLIC_CONVERSATION_ID]!.messages.length, 1);
+  assert.equal(state.conversations[PUBLIC_CONVERSATION_ID]!.messages[0]!.content, "welcome back");
+  assert.equal(state.conversations["direct:u1:u2"]!.messages.length, 1);
+  assert.equal(state.conversations["direct:u1:u2"]!.messages[0]!.content, "missed you");
+});
+
+test("SET_AUTHENTICATING and AUTH_ERROR manage the login screen's own state", () => {
+  let state = createInitialState();
+  state = chatReducer(state, { type: "SET_AUTHENTICATING", value: true });
+  assert.equal(state.authenticating, true);
+  assert.equal(state.authError, null);
+
+  state = chatReducer(state, { type: "AUTH_ERROR", message: "Invalid username or password." });
+  assert.equal(state.authenticating, false);
+  assert.equal(state.authError, "Invalid username or password.");
+
+  // Starting a new attempt clears the previous error.
+  state = chatReducer(state, { type: "SET_AUTHENTICATING", value: true });
+  assert.equal(state.authError, null);
+});
+
+test("LOGGED_OUT clears identity/users/conversations back to just public", () => {
   let state = ready(createInitialState(), "u1", "alice", [{ id: "u2", username: "bob" }]);
-  state = chatReducer(state, { type: "RESET_CHAT" });
+  state = chatReducer(state, { type: "LOGGED_OUT" });
   assert.equal(state.userId, null);
   assert.equal(Object.keys(state.users).length, 0);
   assert.equal(Object.keys(state.conversations).length, 1);

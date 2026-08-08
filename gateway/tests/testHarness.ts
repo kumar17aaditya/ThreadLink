@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { WebSocket } from "ws";
 import { GatewayServer } from "../src/gatewayServer.js";
+import { openDatabase } from "../src/db.js";
 import type { GatewayConfig } from "../src/config.js";
 import { logger } from "../src/logger.js";
 
@@ -84,10 +85,11 @@ export async function startBackend(port: number, maxMessageSize = 8192): Promise
 }
 
 export function startGateway(config: GatewayConfig): GatewayServer {
-  return new GatewayServer(config);
+  const db = openDatabase(config.dbPath);
+  return new GatewayServer(config, db);
 }
 
-export function defaultTestConfig(backendPort: number, gatewayPort: number): GatewayConfig {
+export function defaultTestConfig(backendPort: number, gatewayPort: number, dbPath = ":memory:"): GatewayConfig {
   return {
     gatewayPort,
     backendHost: "127.0.0.1",
@@ -95,6 +97,7 @@ export function defaultTestConfig(backendPort: number, gatewayPort: number): Gat
     maxClientMessageBytes: 16 * 1024,
     backendMaxMessageBytes: 8192,
     logLevel: "error",
+    dbPath,
   };
 }
 
@@ -117,6 +120,29 @@ export class TestClient {
 
   send(message: unknown): void {
     this.ws.send(JSON.stringify(message));
+  }
+
+  /** Registers, then waits for either `ready` (success) or `error`
+   * (failure) -- whichever arrives, so tests can assert on either
+   * outcome without guessing which one to wait for. */
+  async register(username: string, password: string): Promise<unknown> {
+    this.send({ type: "register", username, password });
+    return this.waitFor(
+      (e): e is { type: "ready" | "error" } =>
+        isType("ready")(e) || isType("error")(e),
+    );
+  }
+
+  async login(username: string, password: string): Promise<unknown> {
+    this.send({ type: "login", username, password });
+    return this.waitFor(
+      (e): e is { type: "ready" | "error" } =>
+        isType("ready")(e) || isType("error")(e),
+    );
+  }
+
+  logout(): void {
+    this.send({ type: "logout" });
   }
 
   close(): void {

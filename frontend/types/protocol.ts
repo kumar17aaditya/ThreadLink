@@ -22,6 +22,9 @@ export type MessageTarget =
 
 /** Client -> gateway */
 export type ClientMessage =
+  | { type: "register"; username: string; password: string }
+  | { type: "login"; username: string; password: string }
+  | { type: "logout" }
   | { type: "setNickname"; nickname: string }
   | { type: "sendMessage"; target: MessageTarget; text: string }
   | { type: "createGroup"; name: string; memberIds: string[] }
@@ -61,7 +64,12 @@ export type ServerMessage =
       username: string;
       users: UserSummary[];
       conversations: ConversationSummary[];
+      /** Full persisted message history across every conversation the
+       * user belongs to, oldest first -- restores all conversation
+       * views in one round trip after login. */
+      messages: MessageSummary[];
     }
+  | { type: "loggedOut" }
   | { type: "userUpdate"; user: UserSummary }
   | { type: "userOffline"; userId: string }
   | { type: "conversationCreated"; conversation: ConversationSummary }

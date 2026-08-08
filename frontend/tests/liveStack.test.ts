@@ -75,7 +75,14 @@ async function startStack(): Promise<Stack> {
   await waitForPort(backendPort);
 
   const gateway = spawn(process.execPath, [GATEWAY_ENTRY], {
-    env: { ...process.env, GATEWAY_PORT: String(gatewayPort), BACKEND_HOST: "127.0.0.1", BACKEND_PORT: String(backendPort), LOG_LEVEL: "error" },
+    env: {
+      ...process.env,
+      GATEWAY_PORT: String(gatewayPort),
+      BACKEND_HOST: "127.0.0.1",
+      BACKEND_PORT: String(backendPort),
+      LOG_LEVEL: "error",
+      DB_PATH: ":memory:",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   gateway.stdout?.on("data", () => {});
@@ -142,7 +149,7 @@ const isMessage = (e: ServerMessage): e is Extract<ServerMessage, { type: "messa
 const isConversationCreated = (e: ServerMessage): e is Extract<ServerMessage, { type: "conversationCreated" }> =>
   e.type === "conversationCreated";
 
-test("frontend ThreadLinkClient: connects, gets ready, and exchanges a real public message end-to-end", async () => {
+test("frontend ThreadLinkClient: register, get ready, and exchange a real public message end-to-end", async () => {
   const stack = await startStack();
   try {
     const a = makeClient(stack.gatewayUrl);
@@ -152,10 +159,12 @@ test("frontend ThreadLinkClient: connects, gets ready, and exchanges a real publ
     await a.connectedPromise;
     await b.connectedPromise;
 
+    a.client.register("frontend-alice", "password123");
+    b.client.register("frontend-bob", "password123");
     const readyA = await waitFor(a.events, isReady);
     await waitFor(b.events, isReady);
     assert.ok(readyA.userId);
-    assert.ok(readyA.username.startsWith("User"));
+    assert.equal(readyA.username, "frontend-alice");
 
     a.client.sendMessage({ kind: "public" }, "hello from the real frontend client");
     const seenByB = await waitFor(b.events, isMessage);
@@ -179,6 +188,8 @@ test("frontend ThreadLinkClient: direct message round-trip using real userIds fr
     await a.connectedPromise;
     await b.connectedPromise;
 
+    a.client.register("frontend-alice", "password123");
+    b.client.register("frontend-bob", "password123");
     const readyA = await waitFor(a.events, isReady);
     const readyB = await waitFor(b.events, isReady);
 
@@ -208,6 +219,9 @@ test("frontend ThreadLinkClient: group creation and message fan-out", async () =
     c.client.connect();
     await Promise.all([a.connectedPromise, b.connectedPromise, c.connectedPromise]);
 
+    a.client.register("frontend-alice", "password123");
+    b.client.register("frontend-bob", "password123");
+    c.client.register("frontend-carol", "password123");
     const readyB = await waitFor(b.events, isReady);
     await waitFor(a.events, isReady);
     await waitFor(c.events, isReady);
@@ -238,6 +252,7 @@ test("frontend ThreadLinkClient: nickname change surfaces via the real backend u
     const a = makeClient(stack.gatewayUrl);
     a.client.connect();
     await a.connectedPromise;
+    a.client.register("frontend-oldname", "password123");
     await waitFor(a.events, isReady);
 
     a.client.setNickname("frontend-e2e-name");
@@ -248,6 +263,44 @@ test("frontend ThreadLinkClient: nickname change surfaces via the real backend u
     assert.equal(update.user.username, "frontend-e2e-name");
 
     a.client.disconnect();
+  } finally {
+    await stopStack(stack);
+  }
+});
+
+test("frontend ThreadLinkClient: logout then login again restores identity and message history", async () => {
+  const stack = await startStack();
+  try {
+    const a1 = makeClient(stack.gatewayUrl);
+    a1.client.connect();
+    await a1.connectedPromise;
+    a1.client.register("frontend-persist", "password123");
+    const initial = await waitFor(a1.events, isReady);
+
+    a1.client.sendMessage({ kind: "public" }, "before logout");
+    await waitFor(a1.events, isMessage);
+
+    const loggedOutPromise = new Promise<void>((resolve) => {
+      const interval = setInterval(() => {
+        if (a1.events.some((e) => e.type === "loggedOut")) {
+          clearInterval(interval);
+          resolve();
+        }
+      }, 20);
+    });
+    a1.client.logout();
+    await loggedOutPromise;
+
+    const a2 = makeClient(stack.gatewayUrl);
+    a2.client.connect();
+    await a2.connectedPromise;
+    a2.client.login("frontend-persist", "password123");
+    const restored = await waitFor(a2.events, isReady);
+
+    assert.equal(restored.userId, initial.userId);
+    assert.ok(restored.messages.some((m) => m.text === "before logout"), "message history must be restored after re-login");
+
+    a2.client.disconnect();
   } finally {
     await stopStack(stack);
   }

@@ -11,3 +11,8 @@ client
 # Common OS-specific files
 .DS_Store
 Thumbs.db
+
+# Gateway's default local database (gateway/, or here if run from repo root)
+*.db
+*.db-shm
+*.db-wal

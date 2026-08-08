@@ -9,11 +9,16 @@
  *   Protocol/message parsing (types/protocol.ts)
  *         v
  *   Connection state          -----+
+ *   Auth state                     |
  *   User state                     |  all owned by this reducer
  *   Conversation state              |
  *   Message state              -----+
  *         v
  *   UI state (components read via useChat())
+ *
+ * The gateway address is internal (see lib/storage.ts::getGatewayUrl)
+ * and is never surfaced to the person using the app -- the only
+ * identity they provide is a username and password (register/login).
  */
 import {
   createContext,
@@ -26,17 +31,18 @@ import {
   type ReactNode,
 } from "react";
 import { ThreadLinkClient } from "@/lib/websocket-client";
-import { saveConnectionSettings } from "@/lib/storage";
+import { saveLastUsername } from "@/lib/storage";
 import { chatReducer, createInitialState, type ChatState } from "@/context/chatState";
-import { Conversation, ConnectionSettings, User, PUBLIC_CONVERSATION_ID, directConversationId } from "@/types/chat";
+import { Conversation, User, PUBLIC_CONVERSATION_ID, directConversationId } from "@/types/chat";
 import type { ServerMessage } from "@/types/protocol";
 
 interface ChatContextValue {
   state: ChatState;
   activeConversation: Conversation;
   onlineUsers: User[];
-  connect: (settings?: Partial<ConnectionSettings>) => void;
-  disconnect: () => void;
+  register: (username: string, password: string) => void;
+  login: (username: string, password: string) => void;
+  logout: () => void;
   sendMessage: (content: string) => void;
   changeNickname: (nickname: string) => void;
   setPresence: (presence: "online" | "away") => void;
@@ -51,9 +57,12 @@ interface ChatContextValue {
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
+type PendingAuth = { kind: "register" | "login"; username: string; password: string };
+
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(chatReducer, undefined, createInitialState);
   const clientRef = useRef<ThreadLinkClient | null>(null);
+  const pendingAuthRef = useRef<PendingAuth | null>(null);
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
@@ -62,8 +71,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const handleServerEvent = useCallback((event: ServerMessage) => {
     switch (event.type) {
       case "ready":
-        dispatch({ type: "READY", userId: event.userId, username: event.username, users: event.users, conversations: event.conversations });
-        dispatch({ type: "MARK_CONNECTED" });
+        dispatch({
+          type: "READY",
+          userId: event.userId,
+          username: event.username,
+          users: event.users,
+          conversations: event.conversations,
+          messages: event.messages,
+        });
+        saveLastUsername(event.username);
+        return;
+      case "loggedOut":
+        dispatch({ type: "LOGGED_OUT" });
         return;
       case "userUpdate":
         dispatch({ type: "USER_UPDATE", user: event.user });
@@ -78,48 +97,77 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         dispatch({ type: "MESSAGE_RECEIVED", message: event.message });
         return;
       case "error":
-        dispatch({ type: "ERROR_MESSAGE", code: event.code, message: event.message, conversationId: event.conversationId });
+        // Before "ready" has ever arrived, any error (bad credentials,
+        // username taken, the backend being unreachable, ...) belongs
+        // on the login/register screen, not as an in-app chat banner.
+        if (stateRef.current.userId === null) {
+          dispatch({ type: "AUTH_ERROR", message: event.message });
+        } else {
+          dispatch({ type: "ERROR_MESSAGE", code: event.code, message: event.message, conversationId: event.conversationId });
+        }
         return;
     }
   }, []);
 
-  const connect = useCallback(
-    (overrides?: Partial<ConnectionSettings>) => {
-      const nextSettings: ConnectionSettings = {
-        gatewayUrl: overrides?.gatewayUrl?.trim() || state.settings.gatewayUrl,
-        nickname: overrides?.nickname?.trim() ?? state.settings.nickname,
-      };
+  /** Creates the WebSocket transport once and keeps it alive across
+   * login/logout cycles (logging out closes the *authenticated
+   * session* server-side, not the underlying transport) -- lazily,
+   * memoized, so calling it repeatedly is safe and free after the
+   * first call. */
+  const ensureClient = useCallback((): ThreadLinkClient => {
+    if (clientRef.current) return clientRef.current;
+    const client = new ThreadLinkClient({
+      url: stateRef.current.gatewayUrl,
+      onStatusChange: (status) => {
+        dispatch({ type: "SET_STATUS", status });
+        if (status === "connected" && pendingAuthRef.current) {
+          const pending = pendingAuthRef.current;
+          pendingAuthRef.current = null;
+          if (pending.kind === "register") client.register(pending.username, pending.password);
+          else client.login(pending.username, pending.password);
+        }
+        if (status === "failed" && stateRef.current.userId) {
+          // Reconnection attempts were exhausted; the live session is
+          // gone. Server-side data is untouched -- logging in again
+          // restores everything, same as an explicit logout would.
+          dispatch({ type: "LOGGED_OUT" });
+        }
+      },
+      onEvent: handleServerEvent,
+      onError: (message) => dispatch({ type: "SET_ERROR", message }),
+      reconnect: true,
+    });
+    clientRef.current = client;
+    client.connect();
+    return client;
+  }, [handleServerEvent]);
 
-      saveConnectionSettings(nextSettings);
-      dispatch({ type: "SET_SETTINGS", settings: nextSettings });
-      dispatch({ type: "RESET_CHAT" });
-      dispatch({ type: "SET_ERROR", message: null });
+  useEffect(() => {
+    ensureClient();
+  }, [ensureClient]);
 
-      clientRef.current?.disconnect();
-      const client = new ThreadLinkClient({
-        url: nextSettings.gatewayUrl,
-        onStatusChange: (status) => {
-          dispatch({ type: "SET_STATUS", status });
-          if (status === "connected" && nextSettings.nickname) {
-            client.setNickname(nextSettings.nickname);
-          }
-        },
-        onEvent: handleServerEvent,
-        onError: (message) => dispatch({ type: "SET_ERROR", message }),
-        reconnect: true,
-      });
-
-      clientRef.current = client;
-      client.connect();
+  const register = useCallback(
+    (username: string, password: string) => {
+      dispatch({ type: "SET_AUTHENTICATING", value: true });
+      const client = ensureClient();
+      if (client.isConnected()) client.register(username, password);
+      else pendingAuthRef.current = { kind: "register", username, password };
     },
-    [handleServerEvent, state.settings],
+    [ensureClient],
   );
 
-  const disconnect = useCallback(() => {
-    clientRef.current?.disconnect();
-    clientRef.current = null;
-    dispatch({ type: "SET_STATUS", status: "disconnected" });
-    dispatch({ type: "RESET_CHAT" });
+  const login = useCallback(
+    (username: string, password: string) => {
+      dispatch({ type: "SET_AUTHENTICATING", value: true });
+      const client = ensureClient();
+      if (client.isConnected()) client.login(username, password);
+      else pendingAuthRef.current = { kind: "login", username, password };
+    },
+    [ensureClient],
+  );
+
+  const logout = useCallback(() => {
+    clientRef.current?.logout();
   }, []);
 
   const sendMessage = useCallback((content: string) => {
@@ -153,8 +201,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     const sent = clientRef.current?.setNickname(trimmed);
     if (sent) {
-      dispatch({ type: "SET_SETTINGS", settings: { ...stateRef.current.settings, nickname: trimmed } });
-      saveConnectionSettings({ ...stateRef.current.settings, nickname: trimmed });
       dispatch({ type: "SET_NICKNAME_MODAL", open: false });
     }
   }, []);
@@ -196,7 +242,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const activeConversation: Conversation = useMemo(() => {
     if (activeConversationRaw.type === "direct" && activeConversationRaw.peerId) {
       const peer = state.users[activeConversationRaw.peerId];
-      return { ...activeConversationRaw, title: peer?.nickname ?? "Offline user" };
+      // Prefer the peer's live nickname (freshest, reflects any rename
+      // while online); fall back to the persisted title the gateway
+      // resolved for a restored conversation; "Offline user" is a
+      // last resort that should be rare once conversationsFor()
+      // resolves titles server-side.
+      return { ...activeConversationRaw, title: peer?.nickname || activeConversationRaw.title || "Offline user" };
     }
     return activeConversationRaw;
   }, [activeConversationRaw, state.users]);
@@ -211,8 +262,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       state,
       activeConversation,
       onlineUsers,
-      connect,
-      disconnect,
+      register,
+      login,
+      logout,
       sendMessage,
       changeNickname,
       setPresence,
@@ -228,8 +280,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       state,
       activeConversation,
       onlineUsers,
-      connect,
-      disconnect,
+      register,
+      login,
+      logout,
       sendMessage,
       changeNickname,
       setPresence,

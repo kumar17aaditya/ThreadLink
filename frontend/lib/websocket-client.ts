@@ -100,6 +100,18 @@ export class ThreadLinkClient {
     return this.send({ type: "setNickname", nickname });
   }
 
+  register(username: string, password: string): boolean {
+    return this.send({ type: "register", username, password });
+  }
+
+  login(username: string, password: string): boolean {
+    return this.send({ type: "login", username, password });
+  }
+
+  logout(): boolean {
+    return this.send({ type: "logout" });
+  }
+
   sendMessage(target: MessageTarget, text: string): boolean {
     return this.send({ type: "sendMessage", target, text });
   }

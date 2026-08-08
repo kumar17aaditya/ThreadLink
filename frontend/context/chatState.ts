@@ -5,9 +5,9 @@
  * be unit-tested directly -- see tests/chatReducer.test.ts.
  */
 import { createId } from "@/lib/id";
-import { loadConnectionSettings } from "@/lib/storage";
+import { getGatewayUrl } from "@/lib/storage";
 import { PUBLIC_CONVERSATION_ID } from "@/types/chat";
-import type { Conversation, ConnectionSettings, Message, User } from "@/types/chat";
+import type { Conversation, Message, User } from "@/types/chat";
 import type {
   ConnectionStatus,
   ConversationSummary,
@@ -18,7 +18,8 @@ import type {
 
 export interface ChatState {
   connectionStatus: ConnectionStatus;
-  settings: ConnectionSettings;
+  /** Internal gateway address; never rendered or editable in the UI. */
+  gatewayUrl: string;
   userId: string | null;
   nickname: string;
   presence: Presence;
@@ -33,14 +34,27 @@ export interface ChatState {
    * the reducer auto-select the group the creator just made without
    * the gateway needing a separate "ack" message type. */
   pendingGroupCreation: boolean;
+  /** True while a register/login request is in flight, for the login
+   * screen's own loading state. */
+  authenticating: boolean;
+  /** Error specific to the login/register screen -- kept separate
+   * from lastError so a failed login attempt doesn't leak a stale
+   * banner into the chat UI once inside, and vice versa. */
+  authError: string | null;
   lastError: string | null;
   hasConnectedOnce: boolean;
 }
 
 export type ChatAction =
   | { type: "SET_STATUS"; status: ConnectionStatus }
-  | { type: "SET_SETTINGS"; settings: ConnectionSettings }
-  | { type: "READY"; userId: string; username: string; users: UserSummary[]; conversations: ConversationSummary[] }
+  | {
+      type: "READY";
+      userId: string;
+      username: string;
+      users: UserSummary[];
+      conversations: ConversationSummary[];
+      messages: MessageSummary[];
+    }
   | { type: "USER_UPDATE"; user: UserSummary }
   | { type: "USER_OFFLINE"; userId: string }
   | { type: "CONVERSATION_CREATED"; conversation: ConversationSummary }
@@ -52,8 +66,9 @@ export type ChatAction =
   | { type: "SET_NEW_GROUP_MODAL"; open: boolean }
   | { type: "MARK_PENDING_GROUP_CREATION" }
   | { type: "SET_ERROR"; message: string | null }
-  | { type: "RESET_CHAT" }
-  | { type: "MARK_CONNECTED" };
+  | { type: "SET_AUTHENTICATING"; value: boolean }
+  | { type: "AUTH_ERROR"; message: string }
+  | { type: "LOGGED_OUT" };
 
 function createPublicConversation(memberIds: string[] = []): Conversation {
   return { id: PUBLIC_CONVERSATION_ID, type: "public", title: "Public Chat", memberIds, messages: [], unreadCount: 0 };
@@ -65,7 +80,12 @@ function conversationFromSummary(summary: ConversationSummary, selfId: string): 
     return {
       id: summary.id,
       type: "direct",
-      title: "", // resolved at render time from the peer's live nickname
+      // The gateway resolves this to the peer's persisted username for
+      // restored conversations (so an offline peer still shows their
+      // real name); when live-created it's empty and the peer's live
+      // nickname (from state.users) takes precedence at render time --
+      // see ChatProvider's activeConversation memo and Sidebar.
+      title: summary.title,
       peerId,
       messages: [],
       unreadCount: 0,
@@ -84,12 +104,22 @@ function conversationFromSummary(summary: ConversationSummary, selfId: string): 
   return createPublicConversation(summary.memberIds);
 }
 
+function messageFromSummary(m: MessageSummary, selfId: string): Message {
+  return {
+    id: m.id,
+    kind: m.kind,
+    senderId: m.senderId,
+    sender: m.senderUsername ?? undefined,
+    content: m.text,
+    timestamp: new Date(m.timestamp),
+    isOwn: m.senderId !== null && m.senderId === selfId,
+  };
+}
+
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "SET_STATUS":
       return { ...state, connectionStatus: action.status };
-    case "SET_SETTINGS":
-      return { ...state, settings: action.settings };
 
     case "READY": {
       const users: Record<string, User> = {};
@@ -102,6 +132,11 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         if (summary.id === PUBLIC_CONVERSATION_ID) continue;
         conversations[summary.id] = conversationFromSummary(summary, action.userId);
       }
+      for (const m of action.messages) {
+        const conv = conversations[m.conversationId];
+        if (!conv) continue;
+        conv.messages.push(messageFromSummary(m, action.userId));
+      }
 
       return {
         ...state,
@@ -110,7 +145,10 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         presence: "online",
         users,
         conversations,
-        activeConversationId: state.conversations[state.activeConversationId] ? state.activeConversationId : PUBLIC_CONVERSATION_ID,
+        activeConversationId: PUBLIC_CONVERSATION_ID,
+        authenticating: false,
+        authError: null,
+        hasConnectedOnce: true,
       };
     }
 
@@ -181,15 +219,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           ? createPublicConversation()
           : { id: m.conversationId, type: "direct", title: m.senderUsername ?? "Unknown", messages: [], unreadCount: 0 });
 
-      const message: Message = {
-        id: m.id,
-        kind: m.kind,
-        senderId: m.senderId,
-        sender: m.senderUsername ?? undefined,
-        content: m.text,
-        timestamp: new Date(m.timestamp),
-        isOwn: m.senderId !== null && m.senderId === state.userId,
-      };
+      const message = messageFromSummary(m, state.userId ?? "");
       const isActive = state.activeConversationId === conversation.id;
 
       return {
@@ -248,10 +278,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, pendingGroupCreation: true };
     case "SET_ERROR":
       return { ...state, lastError: action.message };
-    case "MARK_CONNECTED":
-      return { ...state, hasConnectedOnce: true };
+    case "SET_AUTHENTICATING":
+      return { ...state, authenticating: action.value, authError: action.value ? null : state.authError };
+    case "AUTH_ERROR":
+      return { ...state, authenticating: false, authError: action.message };
 
-    case "RESET_CHAT":
+    case "LOGGED_OUT":
       return {
         ...state,
         userId: null,
@@ -260,6 +292,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         users: {},
         conversations: { [PUBLIC_CONVERSATION_ID]: createPublicConversation() },
         activeConversationId: PUBLIC_CONVERSATION_ID,
+        authenticating: false,
         lastError: null,
       };
 
@@ -269,10 +302,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 }
 
 export function createInitialState(): ChatState {
-  const settings = loadConnectionSettings();
   return {
     connectionStatus: "idle",
-    settings,
+    gatewayUrl: getGatewayUrl(),
     userId: null,
     nickname: "",
     presence: "online",
@@ -283,6 +315,8 @@ export function createInitialState(): ChatState {
     nicknameModalOpen: false,
     newGroupModalOpen: false,
     pendingGroupCreation: false,
+    authenticating: false,
+    authError: null,
     lastError: null,
     hasConnectedOnce: false,
   };

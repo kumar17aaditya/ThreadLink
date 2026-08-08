@@ -32,7 +32,6 @@ export interface Conversation {
 
 export interface ConnectionSettings {
   gatewayUrl: string;
-  nickname: string;
 }
 
 export const PUBLIC_CONVERSATION_ID = "public";

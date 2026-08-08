@@ -15,6 +15,8 @@ export interface GatewayConfig {
   /** Must not exceed the backend's own MAX_MESSAGE_SIZE (server.conf). */
   backendMaxMessageBytes: number;
   logLevel: "debug" | "info" | "warn" | "error";
+  /** Path to the SQLite database file (users, conversations, messages). */
+  dbPath: string;
 }
 
 const DEFAULTS: GatewayConfig = {
@@ -24,6 +26,7 @@ const DEFAULTS: GatewayConfig = {
   maxClientMessageBytes: 16 * 1024,
   backendMaxMessageBytes: 8192,
   logLevel: "info",
+  dbPath: "./threadlink.db",
 };
 
 function intFromEnv(name: string, fallback: number, min: number, max: number): number {
@@ -64,5 +67,6 @@ export function loadConfig(): GatewayConfig {
       16 * 1024 * 1024,
     ),
     logLevel: logLevelFromEnv(DEFAULTS.logLevel),
+    dbPath: process.env.DB_PATH?.trim() || DEFAULTS.dbPath,
   };
 }

@@ -3,16 +3,17 @@
  * documented in docs/GATEWAY_PROTOCOL.md — keep the two in sync.
  *
  * Design notes:
- *  - `userId` is a gateway-issued session identity (stable for the
- *    lifetime of the WebSocket connection), independent of the
- *    backend nickname, which can change mid-session. This gives
- *    Phase 3 "real" user identity instead of reusing the C++
- *    backend's nickname-as-identity model directly.
+ *  - `userId` is the persistent account id (see users.ts), stable
+ *    across logins/reconnects/gateway restarts -- not a per-session
+ *    identity. A client must register or log in before doing
+ *    anything else; the gateway enforces this (see gatewayServer.ts).
  *  - Presence is "online" | "away" | "offline". "online"/"offline"
- *    are grounded in real connection state (backend TCP connection
- *    alive and welcomed / session gone); "away" is an explicit,
+ *    are grounded in real connection state (logged in with a live
+ *    backend TCP connection / session gone); "away" is an explicit,
  *    real-time client signal broadcast to every other session — not
- *    a frontend-only decoration.
+ *    a frontend-only decoration. Presence is runtime-only and is not
+ *    persisted; every account starts a fresh session as "offline"
+ *    until it logs in again.
  */
 
 // ---- Client -> Gateway ----
@@ -23,6 +24,9 @@ export type MessageTarget =
   | { kind: "group"; groupId: string };
 
 export type ClientMessage =
+  | { type: "register"; username: string; password: string }
+  | { type: "login"; username: string; password: string }
+  | { type: "logout" }
   | { type: "setNickname"; nickname: string }
   | { type: "sendMessage"; target: MessageTarget; text: string }
   | { type: "createGroup"; name: string; memberIds: string[] }
@@ -33,6 +37,8 @@ const MAX_NICKNAME_LEN = 24;
 const MAX_TEXT_LEN = 4000;
 const MAX_GROUP_NAME_LEN = 48;
 const MAX_GROUP_MEMBERS = 64;
+const MAX_USERNAME_LEN = 24;
+const MAX_PASSWORD_LEN = 256;
 
 export type ValidationResult =
   | { ok: true; message: ClientMessage }
@@ -51,6 +57,30 @@ export function validateClientMessage(raw: unknown): ValidationResult {
   const type = obj["type"];
 
   switch (type) {
+    case "register": {
+      const username = obj["username"];
+      const password = obj["password"];
+      if (!isNonEmptyString(username) || username.length > MAX_USERNAME_LEN) {
+        return { ok: false, error: `username must be 1-${MAX_USERNAME_LEN} characters` };
+      }
+      if (!isNonEmptyString(password) || password.length > MAX_PASSWORD_LEN) {
+        return { ok: false, error: "password is required" };
+      }
+      return { ok: true, message: { type: "register", username, password } };
+    }
+    case "login": {
+      const username = obj["username"];
+      const password = obj["password"];
+      if (!isNonEmptyString(username) || username.length > MAX_USERNAME_LEN) {
+        return { ok: false, error: `username must be 1-${MAX_USERNAME_LEN} characters` };
+      }
+      if (!isNonEmptyString(password) || password.length > MAX_PASSWORD_LEN) {
+        return { ok: false, error: "password is required" };
+      }
+      return { ok: true, message: { type: "login", username, password } };
+    }
+    case "logout":
+      return { ok: true, message: { type: "logout" } };
     case "setNickname": {
       if (!isNonEmptyString(obj["nickname"]) || obj["nickname"].length > MAX_NICKNAME_LEN) {
         return { ok: false, error: `nickname must be 1-${MAX_NICKNAME_LEN} characters` };
@@ -151,7 +181,13 @@ export type ServerMessage =
       username: string;
       users: UserSummary[];
       conversations: ConversationSummary[];
+      /** Full persisted message history across every conversation the
+       * user is a member of (plus public), oldest first -- lets the
+       * client fully restore its conversation views after login
+       * without a separate round trip. */
+      messages: MessageSummary[];
     }
+  | { type: "loggedOut" }
   | { type: "userUpdate"; user: UserSummary }
   | { type: "userOffline"; userId: string }
   | { type: "conversationCreated"; conversation: ConversationSummary }

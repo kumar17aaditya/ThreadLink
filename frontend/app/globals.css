@@ -59,3 +59,12 @@ body {
   background: rgba(255, 255, 255, 0.14);
   background-clip: padding-box;
 }
+
+/* Firefox has no ::-webkit-scrollbar-* support; this keeps the same
+   restrained, low-contrast scrollbar treatment there instead of
+   falling back to the browser's default (often much more visually
+   prominent) scrollbar. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}

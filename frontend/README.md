@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ThreadLink Frontend
 
-## Getting Started
+The Next.js/React web client for ThreadLink. Talks to the gateway
+(`../gateway/`) over WebSocket using the JSON protocol documented in
+[`../docs/GATEWAY_PROTOCOL.md`](../docs/GATEWAY_PROTOCOL.md) — it never
+connects to the C++ backend directly.
 
-First, run the development server:
+See the [root README](../README.md) for the full three-tier setup
+(backend + gateway + frontend) and current project status.
+
+## Run
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). You'll need the
+gateway (and the C++ backend behind it) running first — see the root
+README's Setup & Run section.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Test
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm test
+```
 
-## Learn More
+Runs unit tests against the real `chatReducer` and protocol
+encode/decode (`tests/chatReducer.test.ts`, `tests/protocol.test.ts`),
+plus live-stack tests that spawn the real gateway and real C++ backend
+and drive the actual `ThreadLinkClient` transport class against them
+(`tests/liveStack.test.ts`). Uses Node's built-in test runner
+(`node:test`) with a small local loader (`tests/aliasResolver.mjs`) to
+resolve the `@/*` path alias — no separate test framework dependency.
 
-To learn more about Next.js, take a look at the following resources:
+## Layout
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```text
+app/                 Next.js App Router entry (layout, page)
+components/           UI components (ThreadLink's dark/indigo design system)
+context/
+  chatState.ts         Pure state: reducer + action/state types (no React/JSX; unit-testable directly)
+  ChatProvider.tsx      React context wiring chatState.ts into the WebSocket transport
+lib/
+  websocket-client.ts   Transport layer: WebSocket lifecycle, reconnect backoff, encode/decode
+  storage.ts, id.ts, format.ts
+types/
+  protocol.ts            Browser<->gateway JSON protocol types (mirrors docs/GATEWAY_PROTOCOL.md)
+  chat.ts                 Frontend-internal domain types (User, Conversation, Message)
+tests/                 Unit + live-stack tests (see above)
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Architecture is layered deliberately: WebSocket transport → protocol
+parsing → connection/user/conversation/message state (in
+`chatState.ts`) → UI. Components read everything through the
+`useChat()` hook; nothing talks to the WebSocket directly except
+`ChatProvider`.
 
-## Deploy on Vercel
+## Design
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Dark-first, restrained blue/indigo accents (`#070708` background,
+`#101012`/`#141417` surfaces), Tailwind CSS + Framer Motion for subtle
+motion, lucide-react icons. See the root README's Design section for
+the intent behind it.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Known limitation
+
+`next build` cannot complete in network-restricted sandboxes that
+can't reach `fonts.googleapis.com` (used by `next/font/google` for
+Geist). `next dev` is unaffected — it falls back to system fonts
+automatically. Not a code defect.

@@ -55,7 +55,7 @@ function NicknameModalForm({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/5 hover:text-white"
+            className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -68,10 +68,14 @@ function NicknameModalForm({
             onSubmit(value);
           }}
         >
+          <label htmlFor="nickname-input" className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-zinc-500">
+            Nickname
+          </label>
           <input
+            id="nickname-input"
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            className="w-full rounded-xl border border-white/8 bg-[#0a0a0b] px-4 py-3 text-sm text-white outline-none focus:border-blue-500/40 focus:ring-2 focus:ring-blue-500/20"
+            className="w-full rounded-xl border border-white/8 bg-[#0a0a0b] px-4 py-3 text-sm text-white outline-none focus:border-blue-500/40 focus:ring-2 focus:ring-blue-500/20 focus-visible:outline-none"
             autoFocus
           />
 
@@ -85,13 +89,13 @@ function NicknameModalForm({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl px-4 py-2 text-sm text-zinc-400 transition hover:bg-white/5 hover:text-white"
+              className="rounded-xl px-4 py-2 text-sm text-zinc-400 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500"
+              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50"
             >
               Save
             </button>

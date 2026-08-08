@@ -75,7 +75,7 @@ export function Sidebar({ mobile = false }: SidebarProps) {
             <button
               type="button"
               onClick={() => setSidebarOpen(false)}
-              className="rounded-lg p-1 text-zinc-500 hover:bg-white/5 hover:text-white lg:hidden"
+              className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 lg:hidden"
               aria-label="Close sidebar"
             >
               <X className="h-4 w-4" />
@@ -90,7 +90,7 @@ export function Sidebar({ mobile = false }: SidebarProps) {
           <button
             type="button"
             onClick={openPublicConversation}
-            className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
+            className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 ${
               state.activeConversationId === PUBLIC_CONVERSATION_ID
                 ? "bg-blue-500/10 text-white"
                 : "text-zinc-300 hover:bg-white/5"
@@ -148,7 +148,7 @@ export function Sidebar({ mobile = false }: SidebarProps) {
               type="button"
               onClick={() => setNewGroupModalOpen(true)}
               disabled={!isConnected || onlineUsers.length === 0}
-              className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/5 hover:text-white disabled:opacity-40"
+              className="rounded-lg p-1 text-zinc-500 transition hover:bg-white/5 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 disabled:opacity-40"
               aria-label="Start a new group"
               title="New group"
             >
@@ -163,7 +163,7 @@ export function Sidebar({ mobile = false }: SidebarProps) {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search users"
-                className="w-full rounded-xl border border-white/8 bg-[#101012] py-2 pl-9 pr-3 text-sm text-white outline-none focus:border-blue-500/30 focus:ring-2 focus:ring-blue-500/10"
+                className="w-full rounded-xl border border-white/8 bg-[#101012] py-2 pl-9 pr-3 text-sm text-white outline-none focus:border-blue-500/30 focus:ring-2 focus:ring-blue-500/10 focus-visible:outline-none"
               />
             </div>
           </div>
@@ -178,7 +178,7 @@ export function Sidebar({ mobile = false }: SidebarProps) {
                 key={user.id}
                 type="button"
                 onClick={() => startDirectConversation(user.id)}
-                className="mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-zinc-300 transition hover:bg-white/5"
+                className="mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-zinc-300 transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50"
               >
                 <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/5 text-xs font-semibold text-zinc-300">
                   {user.nickname.slice(0, 1).toUpperCase()}
@@ -208,7 +208,7 @@ export function Sidebar({ mobile = false }: SidebarProps) {
             type="button"
             onClick={() => setPresence(state.presence === "away" ? "online" : "away")}
             disabled={!isConnected}
-            className={`rounded-lg px-2 py-1 text-[10px] font-medium uppercase tracking-wide transition disabled:opacity-40 ${
+            className={`rounded-lg px-2 py-1 text-[10px] font-medium uppercase tracking-wide transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 disabled:opacity-40 ${
               state.presence === "away"
                 ? "bg-amber-500/15 text-amber-300 hover:bg-amber-500/25"
                 : "bg-white/5 text-zinc-400 hover:bg-white/10"
@@ -224,7 +224,7 @@ export function Sidebar({ mobile = false }: SidebarProps) {
             type="button"
             onClick={() => setNicknameModalOpen(true)}
             disabled={!isConnected}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/8 px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-white/5 disabled:opacity-40"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/8 px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 disabled:opacity-40"
           >
             <UserRound className="h-3.5 w-3.5" />
             Nickname
@@ -233,7 +233,7 @@ export function Sidebar({ mobile = false }: SidebarProps) {
             type="button"
             onClick={() => setNewGroupModalOpen(true)}
             disabled={!isConnected}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/8 px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-white/5 disabled:opacity-40"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/8 px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 disabled:opacity-40"
           >
             <UserRoundCog className="h-3.5 w-3.5" />
             New group
@@ -245,7 +245,7 @@ export function Sidebar({ mobile = false }: SidebarProps) {
             <button
               type="button"
               onClick={() => connect()}
-              className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-blue-500"
+              className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50"
             >
               <Plug className="h-3.5 w-3.5" />
               Reconnect
@@ -254,7 +254,7 @@ export function Sidebar({ mobile = false }: SidebarProps) {
             <button
               type="button"
               onClick={disconnect}
-              className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300 transition hover:bg-red-500/15"
+              className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300 transition hover:bg-red-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/50"
             >
               <LogOut className="h-3.5 w-3.5" />
               Disconnect
@@ -307,7 +307,7 @@ function SidebarRow({
     <button
       type="button"
       onClick={onClick}
-      className={`mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${
+      className={`mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 ${
         active ? "bg-white/8 text-white" : "text-zinc-300 hover:bg-white/5"
       }`}
     >

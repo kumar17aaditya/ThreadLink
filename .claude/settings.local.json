@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make)",
+      "Bash(pkill -f './server')",
+      "Bash(pkill -f 'src/main')",
+      "Bash(pkill -9 -f 'ThreadLink/server')",
+      "Bash(make clean *)",
+      "Bash(make debug *)",
+      "Bash(make release *)",
+      "Bash(python3 tests/run_tests.py \"$\\(pwd\\)/server\")"
+    ]
+  }
+}

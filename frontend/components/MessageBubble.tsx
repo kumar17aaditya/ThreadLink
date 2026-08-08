@@ -7,12 +7,14 @@ import { AlertCircle, Lock, Megaphone } from "lucide-react";
 
 interface MessageBubbleProps {
   message: Message;
+  /** Shown next to the sender name for direct-message conversations,
+   * to visually distinguish a DM bubble from a public/group one. */
+  showPrivacyIcon?: boolean;
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, showPrivacyIcon = false }: MessageBubbleProps) {
   const isSystem = message.kind === "system";
   const isError = message.kind === "error";
-  const isPrivate = message.kind === "private";
   const isOwn = message.isOwn && !isSystem && !isError;
 
   if (isSystem || isError) {
@@ -60,7 +62,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             <span className="text-xs font-medium text-blue-300">
               {message.sender}
             </span>
-            {isPrivate && (
+            {showPrivacyIcon && (
               <Lock className="h-3 w-3 text-zinc-500" aria-label="Private" />
             )}
           </div>

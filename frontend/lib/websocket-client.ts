@@ -1,22 +1,26 @@
 import {
-  buildOutboundChat,
-  buildOutboundList,
-  buildOutboundNick,
-  buildOutboundPrivate,
   encodeOutbound,
   parseInbound,
-} from "@/lib/protocol";
-import type { ConnectionStatus, ParsedServerEvent } from "@/types/protocol";
+} from "@/types/protocol";
+import type {
+  ClientMessage,
+  ConnectionStatus,
+  MessageTarget,
+  ServerMessage,
+} from "@/types/protocol";
 
 export interface ThreadLinkClientOptions {
   url: string;
   onStatusChange: (status: ConnectionStatus) => void;
-  onEvent: (events: ParsedServerEvent[]) => void;
+  onEvent: (event: ServerMessage) => void;
   onError: (message: string) => void;
   reconnect?: boolean;
   maxReconnectAttempts?: number;
 }
 
+/** Thin WebSocket transport: connection lifecycle + reconnect backoff
+ * + encode/decode. No chat logic lives here -- that's ChatProvider's
+ * job (see the layering note in ChatProvider.tsx). */
 export class ThreadLinkClient {
   private socket: WebSocket | null = null;
   private url: string;
@@ -28,7 +32,7 @@ export class ThreadLinkClient {
   private intentionalClose = false;
 
   private readonly onStatusChange: (status: ConnectionStatus) => void;
-  private readonly onEvent: (events: ParsedServerEvent[]) => void;
+  private readonly onEvent: (event: ServerMessage) => void;
   private readonly onError: (message: string) => void;
 
   constructor(options: ThreadLinkClientOptions) {
@@ -50,9 +54,7 @@ export class ThreadLinkClient {
       this.socket = new WebSocket(this.url);
     } catch (error) {
       this.setStatus("failed");
-      this.onError(
-        error instanceof Error ? error.message : "Unable to open WebSocket",
-      );
+      this.onError(error instanceof Error ? error.message : "Unable to open WebSocket");
       return;
     }
 
@@ -64,13 +66,12 @@ export class ThreadLinkClient {
     this.socket.onmessage = (event) => {
       const payload = typeof event.data === "string" ? event.data : "";
       if (!payload) return;
-      this.onEvent(parseInbound(payload));
+      const parsed = parseInbound(payload);
+      if (parsed) this.onEvent(parsed);
     };
 
     this.socket.onerror = () => {
-      if (this.status === "connecting") {
-        this.setStatus("failed");
-      }
+      if (this.status === "connecting") this.setStatus("failed");
       this.onError("WebSocket connection error");
     };
 
@@ -80,15 +81,10 @@ export class ThreadLinkClient {
         this.setStatus("disconnected");
         return;
       }
-
-      if (
-        this.reconnectEnabled &&
-        this.reconnectAttempts < this.maxReconnectAttempts
-      ) {
+      if (this.reconnectEnabled && this.reconnectAttempts < this.maxReconnectAttempts) {
         this.scheduleReconnect();
         return;
       }
-
       this.setStatus(this.reconnectAttempts > 0 ? "failed" : "disconnected");
     };
   }
@@ -100,20 +96,24 @@ export class ThreadLinkClient {
     this.setStatus("disconnected");
   }
 
-  sendChat(content: string): boolean {
-    return this.send(buildOutboundChat(content));
+  setNickname(nickname: string): boolean {
+    return this.send({ type: "setNickname", nickname });
   }
 
-  sendNick(nickname: string): boolean {
-    return this.send(buildOutboundNick(nickname));
+  sendMessage(target: MessageTarget, text: string): boolean {
+    return this.send({ type: "sendMessage", target, text });
   }
 
-  sendPrivate(to: string, content: string): boolean {
-    return this.send(buildOutboundPrivate(to, content));
+  createGroup(name: string, memberIds: string[]): boolean {
+    return this.send({ type: "createGroup", name, memberIds });
   }
 
-  requestUserList(): boolean {
-    return this.send(buildOutboundList());
+  setPresence(presence: "online" | "away"): boolean {
+    return this.send({ type: "setPresence", presence });
+  }
+
+  requestState(): boolean {
+    return this.send({ type: "requestState" });
   }
 
   getStatus(): ConnectionStatus {
@@ -121,19 +121,15 @@ export class ThreadLinkClient {
   }
 
   isConnected(): boolean {
-    return (
-      this.status === "connected" &&
-      this.socket?.readyState === WebSocket.OPEN
-    );
+    return this.status === "connected" && this.socket?.readyState === WebSocket.OPEN;
   }
 
-  private send(payload: Parameters<typeof encodeOutbound>[0]): boolean {
+  private send(message: ClientMessage): boolean {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       this.onError("Not connected to gateway");
       return false;
     }
-
-    this.socket.send(encodeOutbound(payload));
+    this.socket.send(encodeOutbound(message));
     return true;
   }
 
@@ -141,10 +137,7 @@ export class ThreadLinkClient {
     this.setStatus("reconnecting");
     this.reconnectAttempts += 1;
     const delay = Math.min(1000 * 2 ** (this.reconnectAttempts - 1), 10000);
-
-    this.reconnectTimer = setTimeout(() => {
-      this.connect();
-    }, delay);
+    this.reconnectTimer = setTimeout(() => this.connect(), delay);
   }
 
   private clearReconnectTimer(): void {
@@ -162,10 +155,7 @@ export class ThreadLinkClient {
     socket.onmessage = null;
     socket.onerror = null;
     socket.onclose = null;
-    if (
-      socket.readyState === WebSocket.OPEN ||
-      socket.readyState === WebSocket.CONNECTING
-    ) {
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
       socket.close();
     }
     if (updateStatus && this.status !== "failed") {

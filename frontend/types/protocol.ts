@@ -1,4 +1,9 @@
-/** WebSocket protocol types — must stay aligned with docs/PROTOCOL.md when available. */
+/**
+ * Browser <-> gateway JSON protocol types. Mirrors
+ * docs/GATEWAY_PROTOCOL.md and gateway/src/clientProtocol.ts exactly
+ * -- keep all three in sync. The gateway always speaks structured
+ * JSON; there is no legacy raw-text fallback to parse here anymore.
+ */
 
 export type ConnectionStatus =
   | "idle"
@@ -8,40 +13,84 @@ export type ConnectionStatus =
   | "reconnecting"
   | "failed";
 
-/** Client → gateway */
-export type ClientOutbound =
-  | { type: "chat"; content: string }
-  | { type: "nick"; nickname: string }
-  | { type: "private"; to: string; content: string }
-  | { type: "list" };
+export type Presence = "online" | "away" | "offline";
 
-/** Gateway → client (structured JSON envelope) */
-export type ServerInbound =
-  | { type: "connected"; nickname: string; message?: string }
-  | { type: "chat"; from: string; content: string; timestamp?: string }
-  | {
-      type: "private";
-      from: string;
-      to?: string;
-      content: string;
-      timestamp?: string;
-    }
-  | { type: "system"; content: string; timestamp?: string }
-  | { type: "error"; content: string; timestamp?: string }
-  | { type: "users"; users: string[] }
-  | {
-      type: "nick";
-      oldNickname: string;
-      newNickname: string;
-      timestamp?: string;
-    }
-  | { type: "raw"; payload: string };
+export type MessageTarget =
+  | { kind: "public" }
+  | { kind: "direct"; peerId: string }
+  | { kind: "group"; groupId: string };
 
-export type ParsedServerEvent =
-  | { kind: "connected"; nickname: string; message?: string }
-  | { kind: "chat"; from: string; content: string; timestamp?: Date }
-  | { kind: "private"; from: string; to?: string; content: string; timestamp?: Date }
-  | { kind: "system"; content: string; timestamp?: Date }
-  | { kind: "error"; content: string; timestamp?: Date }
-  | { kind: "users"; users: string[] }
-  | { kind: "nick"; oldNickname: string; newNickname: string; timestamp?: Date };
+/** Client -> gateway */
+export type ClientMessage =
+  | { type: "setNickname"; nickname: string }
+  | { type: "sendMessage"; target: MessageTarget; text: string }
+  | { type: "createGroup"; name: string; memberIds: string[] }
+  | { type: "setPresence"; presence: "online" | "away" }
+  | { type: "requestState" };
+
+export interface UserSummary {
+  id: string;
+  username: string;
+  presence: Presence;
+}
+
+export type ConversationKind = "public" | "direct" | "group";
+
+export interface ConversationSummary {
+  id: string;
+  kind: ConversationKind;
+  title: string;
+  memberIds: string[];
+}
+
+export interface MessageSummary {
+  id: string;
+  conversationId: string;
+  kind: "chat" | "system";
+  senderId: string | null;
+  senderUsername: string | null;
+  text: string;
+  timestamp: string;
+}
+
+/** Gateway -> client */
+export type ServerMessage =
+  | {
+      type: "ready";
+      userId: string;
+      username: string;
+      users: UserSummary[];
+      conversations: ConversationSummary[];
+    }
+  | { type: "userUpdate"; user: UserSummary }
+  | { type: "userOffline"; userId: string }
+  | { type: "conversationCreated"; conversation: ConversationSummary }
+  | { type: "message"; message: MessageSummary }
+  | { type: "error"; code: string; message: string; conversationId?: string };
+
+export function encodeOutbound(message: ClientMessage): string {
+  return JSON.stringify(message);
+}
+
+/** Parses one gateway->client frame. Returns null (and logs) for
+ * anything that isn't valid JSON or doesn't look like a ServerMessage
+ * -- the gateway is trusted here (unlike the gateway's own inbound
+ * validation of untrusted browser input), so this is a defensive
+ * sanity check rather than a full schema validator. */
+export function parseInbound(data: string): ServerMessage | null {
+  try {
+    const parsed = JSON.parse(data) as unknown;
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      typeof (parsed as Record<string, unknown>)["type"] === "string"
+    ) {
+      return parsed as ServerMessage;
+    }
+    console.warn("Received a gateway message with no recognizable type:", parsed);
+    return null;
+  } catch {
+    console.warn("Received a non-JSON gateway message:", data);
+    return null;
+  }
+}

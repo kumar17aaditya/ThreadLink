@@ -22,7 +22,14 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SERVER_BIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO_ROOT, "server")
 TEST_PORT = 8099
 TEST_MAX_MESSAGE_SIZE = 4096
-CONNECT_TIMEOUT = 5.0
+# ThreadSanitizer instrumentation adds substantial runtime overhead
+# (commonly 5-15x) on top of whatever load is already on the machine,
+# so a socket timeout comfortable for plain debug/release builds can
+# legitimately be too tight for a `make tsan` binary under load even
+# though nothing is actually wrong -- the server still delivers the
+# frame, just slower. THREADLINK_TEST_TIMEOUT lets a slower build/CI
+# lane widen the margin without changing the default for normal runs.
+CONNECT_TIMEOUT = float(os.environ.get("THREADLINK_TEST_TIMEOUT", "5.0"))
 
 PASS = []
 FAIL = []
@@ -298,7 +305,11 @@ def test_fragmented_frame():
     try:
         recv_frame(s)  # WELCOME
         send_frame_fragmented(s, b"/nick fragbot", delay=0.005)
-        resp = recv_frame(s)
+        # An unrelated client's SYS join/leave notice (e.g. the previous
+        # test's idle-probe disconnecting) can legitimately land here
+        # first; scan for our own NICK confirmation rather than assuming
+        # it's the very next frame.
+        resp = recv_matching(s, b"NICK ")
         report("fragmented_frame", resp.startswith(b"NICK ") and b"fragbot" in resp,
                f"got {resp!r}")
     finally:
@@ -314,8 +325,10 @@ def test_coalesced_frames():
         recv_frame(s)  # WELCOME
         combined = encode_frame(b"/nick coala") + encode_frame(b"/list")
         s.sendall(combined)
-        resp1 = recv_frame(s)
-        resp2 = recv_frame(s)
+        # Same interleaving risk as above: scan for each expected
+        # response by content instead of assuming positions 1 and 2.
+        resp1 = recv_matching(s, b"NICK ")
+        resp2 = recv_matching(s, b"LIST")
         ok = resp1.startswith(b"NICK ") and resp2.startswith(b"LIST") and b"coala" in resp2
         report("coalesced_frames", ok, f"{resp1!r} {resp2!r}")
     finally:

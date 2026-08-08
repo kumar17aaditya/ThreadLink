@@ -1,5 +1,20 @@
 "use client";
 
+/**
+ * Layering (per the architecture this project intentionally keeps
+ * separated):
+ *
+ *   WebSocket transport      (lib/websocket-client.ts)
+ *         v
+ *   Protocol/message parsing (types/protocol.ts)
+ *         v
+ *   Connection state          -----+
+ *   User state                     |  all owned by this reducer
+ *   Conversation state              |
+ *   Message state              -----+
+ *         v
+ *   UI state (components read via useChat())
+ */
 import {
   createContext,
   useCallback,
@@ -11,182 +26,27 @@ import {
   type ReactNode,
 } from "react";
 import { ThreadLinkClient } from "@/lib/websocket-client";
-import { createId } from "@/lib/id";
-import { loadConnectionSettings, saveConnectionSettings } from "@/lib/storage";
-import type {
-  ConnectionSettings,
-  Conversation,
-  Message,
-  User,
-} from "@/types/chat";
-import {
-  PUBLIC_CONVERSATION_ID,
-  privateConversationId,
-} from "@/types/chat";
-import type { ConnectionStatus, ParsedServerEvent } from "@/types/protocol";
-
-interface ChatState {
-  connectionStatus: ConnectionStatus;
-  settings: ConnectionSettings;
-  nickname: string;
-  onlineUsers: User[];
-  conversations: Record<string, Conversation>;
-  activeConversationId: string;
-  sidebarOpen: boolean;
-  nicknameModalOpen: boolean;
-  lastError: string | null;
-  hasConnectedOnce: boolean;
-}
-
-type ChatAction =
-  | { type: "SET_STATUS"; status: ConnectionStatus }
-  | { type: "SET_SETTINGS"; settings: ConnectionSettings }
-  | { type: "SET_NICKNAME"; nickname: string }
-  | { type: "SET_USERS"; users: string[] }
-  | { type: "ADD_MESSAGE"; conversationId: string; message: Message }
-  | { type: "SET_ACTIVE_CONVERSATION"; conversationId: string }
-  | { type: "SET_SIDEBAR_OPEN"; open: boolean }
-  | { type: "SET_NICKNAME_MODAL"; open: boolean }
-  | { type: "SET_ERROR"; message: string | null }
-  | { type: "RESET_CHAT" }
-  | { type: "MARK_CONNECTED" };
-
-function createPublicConversation(): Conversation {
-  return {
-    id: PUBLIC_CONVERSATION_ID,
-    type: "public",
-    title: "Public Chat",
-    messages: [],
-    unreadCount: 0,
-  };
-}
-
-function createPrivateConversation(participantNickname: string): Conversation {
-  return {
-    id: privateConversationId(participantNickname),
-    type: "private",
-    title: participantNickname,
-    participantNickname,
-    messages: [],
-    unreadCount: 0,
-  };
-}
-
-function ensureConversation(
-  conversations: Record<string, Conversation>,
-  conversationId: string,
-  factory: () => Conversation,
-): Record<string, Conversation> {
-  if (conversations[conversationId]) return conversations;
-  return { ...conversations, [conversationId]: factory() };
-}
-
-function chatReducer(state: ChatState, action: ChatAction): ChatState {
-  switch (action.type) {
-    case "SET_STATUS":
-      return { ...state, connectionStatus: action.status };
-    case "SET_SETTINGS":
-      return { ...state, settings: action.settings };
-    case "SET_NICKNAME":
-      return { ...state, nickname: action.nickname };
-    case "SET_USERS": {
-      const onlineUsers = action.users.map((nickname) => ({
-        id: nickname.toLowerCase(),
-        nickname,
-        isOnline: true,
-      }));
-      return { ...state, onlineUsers };
-    }
-    case "ADD_MESSAGE": {
-      const existing =
-        state.conversations[action.conversationId] ??
-        (action.conversationId.startsWith("private:")
-          ? createPrivateConversation(
-              action.conversationId.slice("private:".length),
-            )
-          : null);
-
-      if (!existing) return state;
-
-      const isActive = state.activeConversationId === action.conversationId;
-      const updatedConversation: Conversation = {
-        ...existing,
-        messages: [...existing.messages, action.message],
-        unreadCount: isActive ? 0 : existing.unreadCount + 1,
-      };
-
-      return {
-        ...state,
-        conversations: {
-          ...state.conversations,
-          [action.conversationId]: updatedConversation,
-        },
-      };
-    }
-    case "SET_ACTIVE_CONVERSATION": {
-      const conversation = state.conversations[action.conversationId];
-      if (!conversation) return state;
-      return {
-        ...state,
-        activeConversationId: action.conversationId,
-        conversations: {
-          ...state.conversations,
-          [action.conversationId]: { ...conversation, unreadCount: 0 },
-        },
-        sidebarOpen: false,
-      };
-    }
-    case "SET_SIDEBAR_OPEN":
-      return { ...state, sidebarOpen: action.open };
-    case "SET_NICKNAME_MODAL":
-      return { ...state, nicknameModalOpen: action.open };
-    case "SET_ERROR":
-      return { ...state, lastError: action.message };
-    case "MARK_CONNECTED":
-      return { ...state, hasConnectedOnce: true };
-    case "RESET_CHAT":
-      return {
-        ...state,
-        nickname: "",
-        onlineUsers: [],
-        conversations: { [PUBLIC_CONVERSATION_ID]: createPublicConversation() },
-        activeConversationId: PUBLIC_CONVERSATION_ID,
-        lastError: null,
-      };
-    default:
-      return state;
-  }
-}
-
-function createInitialState(): ChatState {
-  const settings = loadConnectionSettings();
-  return {
-    connectionStatus: "idle",
-    settings,
-    nickname: "",
-    onlineUsers: [],
-    conversations: { [PUBLIC_CONVERSATION_ID]: createPublicConversation() },
-    activeConversationId: PUBLIC_CONVERSATION_ID,
-    sidebarOpen: false,
-    nicknameModalOpen: false,
-    lastError: null,
-    hasConnectedOnce: false,
-  };
-}
+import { saveConnectionSettings } from "@/lib/storage";
+import { chatReducer, createInitialState, type ChatState } from "@/context/chatState";
+import { Conversation, ConnectionSettings, User, PUBLIC_CONVERSATION_ID, directConversationId } from "@/types/chat";
+import type { ServerMessage } from "@/types/protocol";
 
 interface ChatContextValue {
   state: ChatState;
   activeConversation: Conversation;
+  onlineUsers: User[];
   connect: (settings?: Partial<ConnectionSettings>) => void;
   disconnect: () => void;
   sendMessage: (content: string) => void;
   changeNickname: (nickname: string) => void;
-  requestUserList: () => void;
+  setPresence: (presence: "online" | "away") => void;
   selectConversation: (conversationId: string) => void;
-  startPrivateConversation: (nickname: string) => void;
+  startDirectConversation: (peerId: string) => void;
+  createGroup: (name: string, memberIds: string[]) => void;
   openPublicConversation: () => void;
   setSidebarOpen: (open: boolean) => void;
   setNicknameModalOpen: (open: boolean) => void;
+  setNewGroupModalOpen: (open: boolean) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -195,115 +55,33 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(chatReducer, undefined, createInitialState);
   const clientRef = useRef<ThreadLinkClient | null>(null);
   const stateRef = useRef(state);
-  // Refs are for values read outside of rendering (event handlers, the
-  // WebSocket callbacks below); mutating one during render itself is
-  // unsafe, so sync it in an effect that runs after every commit instead.
   useEffect(() => {
     stateRef.current = state;
   });
 
-  const appendMessage = useCallback(
-    (conversationId: string, message: Omit<Message, "id">) => {
-      dispatch({
-        type: "ADD_MESSAGE",
-        conversationId,
-        message: { ...message, id: createId("msg") },
-      });
-    },
-    [],
-  );
-
-  const handleServerEvents = useCallback(
-    (events: ParsedServerEvent[]) => {
-      for (const event of events) {
-        const current = stateRef.current;
-
-        switch (event.kind) {
-          case "connected": {
-            dispatch({ type: "SET_NICKNAME", nickname: event.nickname });
-            dispatch({ type: "MARK_CONNECTED" });
-            if (event.message) {
-              appendMessage(PUBLIC_CONVERSATION_ID, {
-                kind: "system",
-                content: event.message,
-                timestamp: new Date(),
-                isOwn: false,
-              });
-            }
-            clientRef.current?.requestUserList();
-            break;
-          }
-          case "chat": {
-            appendMessage(PUBLIC_CONVERSATION_ID, {
-              kind: "chat",
-              sender: event.from,
-              content: event.content,
-              timestamp: event.timestamp ?? new Date(),
-              isOwn: event.from === current.nickname,
-            });
-            break;
-          }
-          case "private": {
-            const peer =
-              event.from === current.nickname
-                ? event.to ?? "Unknown"
-                : event.from;
-            const conversationId = privateConversationId(peer);
-            dispatch({
-              type: "ADD_MESSAGE",
-              conversationId,
-              message: {
-                id: createId("msg"),
-                kind: "private",
-                sender: event.from,
-                content: event.content,
-                timestamp: event.timestamp ?? new Date(),
-                isOwn: event.from === current.nickname,
-              },
-            });
-            break;
-          }
-          case "system": {
-            appendMessage(PUBLIC_CONVERSATION_ID, {
-              kind: "system",
-              content: event.content,
-              timestamp: event.timestamp ?? new Date(),
-              isOwn: false,
-            });
-            break;
-          }
-          case "error": {
-            const activeId = current.activeConversationId;
-            appendMessage(activeId, {
-              kind: "error",
-              content: event.content,
-              timestamp: event.timestamp ?? new Date(),
-              isOwn: false,
-            });
-            dispatch({ type: "SET_ERROR", message: event.content });
-            break;
-          }
-          case "users":
-            dispatch({ type: "SET_USERS", users: event.users });
-            break;
-          case "nick": {
-            if (event.newNickname === current.nickname || event.oldNickname === current.nickname) {
-              dispatch({ type: "SET_NICKNAME", nickname: event.newNickname });
-            }
-            appendMessage(PUBLIC_CONVERSATION_ID, {
-              kind: "system",
-              content: `${event.oldNickname} is now known as ${event.newNickname}.`,
-              timestamp: event.timestamp ?? new Date(),
-              isOwn: false,
-            });
-            clientRef.current?.requestUserList();
-            break;
-          }
-        }
-      }
-    },
-    [appendMessage],
-  );
+  const handleServerEvent = useCallback((event: ServerMessage) => {
+    switch (event.type) {
+      case "ready":
+        dispatch({ type: "READY", userId: event.userId, username: event.username, users: event.users, conversations: event.conversations });
+        dispatch({ type: "MARK_CONNECTED" });
+        return;
+      case "userUpdate":
+        dispatch({ type: "USER_UPDATE", user: event.user });
+        return;
+      case "userOffline":
+        dispatch({ type: "USER_OFFLINE", userId: event.userId });
+        return;
+      case "conversationCreated":
+        dispatch({ type: "CONVERSATION_CREATED", conversation: event.conversation });
+        return;
+      case "message":
+        dispatch({ type: "MESSAGE_RECEIVED", message: event.message });
+        return;
+      case "error":
+        dispatch({ type: "ERROR_MESSAGE", code: event.code, message: event.message, conversationId: event.conversationId });
+        return;
+    }
+  }, []);
 
   const connect = useCallback(
     (overrides?: Partial<ConnectionSettings>) => {
@@ -323,10 +101,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         onStatusChange: (status) => {
           dispatch({ type: "SET_STATUS", status });
           if (status === "connected" && nextSettings.nickname) {
-            client.sendNick(nextSettings.nickname);
+            client.setNickname(nextSettings.nickname);
           }
         },
-        onEvent: handleServerEvents,
+        onEvent: handleServerEvent,
         onError: (message) => dispatch({ type: "SET_ERROR", message }),
         reconnect: true,
       });
@@ -334,7 +112,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       clientRef.current = client;
       client.connect();
     },
-    [handleServerEvents, state.settings],
+    [handleServerEvent, state.settings],
   );
 
   const disconnect = useCallback(() => {
@@ -359,13 +137,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (!active) return;
 
     if (active.type === "public") {
-      client.sendChat(trimmed);
-      return;
+      client.sendMessage({ kind: "public" }, trimmed);
+    } else if (active.type === "direct" && active.peerId) {
+      client.sendMessage({ kind: "direct", peerId: active.peerId }, trimmed);
+    } else if (active.type === "group") {
+      client.sendMessage({ kind: "group", groupId: active.id }, trimmed);
     }
-
-    const recipient = active.participantNickname;
-    if (!recipient) return;
-    client.sendPrivate(recipient, trimmed);
   }, []);
 
   const changeNickname = useCallback((nickname: string) => {
@@ -374,90 +151,91 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SET_ERROR", message: "Nickname cannot be empty" });
       return;
     }
-
-    const sent = clientRef.current?.sendNick(trimmed);
+    const sent = clientRef.current?.setNickname(trimmed);
     if (sent) {
-      dispatch({ type: "SET_NICKNAME", nickname: trimmed });
-      dispatch({
-        type: "SET_SETTINGS",
-        settings: {
-          ...stateRef.current.settings,
-          nickname: trimmed,
-        },
-      });
-      saveConnectionSettings({
-        ...stateRef.current.settings,
-        nickname: trimmed,
-      });
+      dispatch({ type: "SET_SETTINGS", settings: { ...stateRef.current.settings, nickname: trimmed } });
+      saveConnectionSettings({ ...stateRef.current.settings, nickname: trimmed });
       dispatch({ type: "SET_NICKNAME_MODAL", open: false });
     }
   }, []);
 
-  const requestUserList = useCallback(() => {
-    clientRef.current?.requestUserList();
+  const setPresence = useCallback((presence: "online" | "away") => {
+    clientRef.current?.setPresence(presence);
   }, []);
 
   const selectConversation = useCallback((conversationId: string) => {
     dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId });
   }, []);
 
-  const startPrivateConversation = useCallback((nickname: string) => {
-    if (nickname === stateRef.current.nickname) return;
-
-    const conversationId = privateConversationId(nickname);
+  const startDirectConversation = useCallback((peerId: string) => {
     const current = stateRef.current;
+    if (!current.userId || peerId === current.userId) return;
+    const conversationId = directConversationId(current.userId, peerId);
 
     if (!current.conversations[conversationId]) {
       dispatch({
-        type: "ADD_MESSAGE",
-        conversationId,
-        message: {
-          id: createId("msg"),
-          kind: "system",
-          content: `Private conversation with ${nickname}`,
-          timestamp: new Date(),
-          isOwn: false,
-        },
+        type: "CONVERSATION_CREATED",
+        conversation: { id: conversationId, kind: "direct", title: "", memberIds: [current.userId, peerId] },
       });
     }
-
     dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId });
+  }, []);
+
+  const createGroup = useCallback((name: string, memberIds: string[]) => {
+    const trimmed = name.trim();
+    if (!trimmed || memberIds.length === 0) return;
+    dispatch({ type: "MARK_PENDING_GROUP_CREATION" });
+    clientRef.current?.createGroup(trimmed, memberIds);
   }, []);
 
   const openPublicConversation = useCallback(() => {
     dispatch({ type: "SET_ACTIVE_CONVERSATION", conversationId: PUBLIC_CONVERSATION_ID });
   }, []);
 
-  const activeConversation =
-    state.conversations[state.activeConversationId] ??
-    state.conversations[PUBLIC_CONVERSATION_ID];
+  const activeConversationRaw = state.conversations[state.activeConversationId] ?? state.conversations[PUBLIC_CONVERSATION_ID];
+  const activeConversation: Conversation = useMemo(() => {
+    if (activeConversationRaw.type === "direct" && activeConversationRaw.peerId) {
+      const peer = state.users[activeConversationRaw.peerId];
+      return { ...activeConversationRaw, title: peer?.nickname ?? "Offline user" };
+    }
+    return activeConversationRaw;
+  }, [activeConversationRaw, state.users]);
+
+  const onlineUsers = useMemo(
+    () => Object.values(state.users).filter((u) => u.id !== state.userId),
+    [state.users, state.userId],
+  );
 
   const value = useMemo<ChatContextValue>(
     () => ({
       state,
       activeConversation,
+      onlineUsers,
       connect,
       disconnect,
       sendMessage,
       changeNickname,
-      requestUserList,
+      setPresence,
       selectConversation,
-      startPrivateConversation,
+      startDirectConversation,
+      createGroup,
       openPublicConversation,
       setSidebarOpen: (open) => dispatch({ type: "SET_SIDEBAR_OPEN", open }),
-      setNicknameModalOpen: (open) =>
-        dispatch({ type: "SET_NICKNAME_MODAL", open }),
+      setNicknameModalOpen: (open) => dispatch({ type: "SET_NICKNAME_MODAL", open }),
+      setNewGroupModalOpen: (open) => dispatch({ type: "SET_NEW_GROUP_MODAL", open }),
     }),
     [
       state,
       activeConversation,
+      onlineUsers,
       connect,
       disconnect,
       sendMessage,
       changeNickname,
-      requestUserList,
+      setPresence,
       selectConversation,
-      startPrivateConversation,
+      startDirectConversation,
+      createGroup,
       openPublicConversation,
     ],
   );
@@ -467,10 +245,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
 export function useChat() {
   const context = useContext(ChatContext);
-  if (!context) {
-    throw new Error("useChat must be used within ChatProvider");
-  }
+  if (!context) throw new Error("useChat must be used within ChatProvider");
   return context;
 }
-
-export { createPrivateConversation, ensureConversation, privateConversationId };

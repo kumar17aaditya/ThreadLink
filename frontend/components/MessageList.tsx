@@ -3,7 +3,7 @@
 import { MessageBubble } from "@/components/MessageBubble";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import type { Conversation } from "@/types/chat";
-import { Hash, Lock, MessageSquareOff, WifiOff } from "lucide-react";
+import { Hash, Lock, MessageSquareOff, UsersRound, WifiOff } from "lucide-react";
 
 interface MessageListProps {
   conversation: Conversation;
@@ -14,6 +14,8 @@ export function MessageList({ conversation, isConnected }: MessageListProps) {
   const { containerRef } = useAutoScroll<HTMLDivElement>(
     conversation.messages.length,
   );
+  const isDirect = conversation.type === "direct";
+  const isGroup = conversation.type === "group";
 
   if (!isConnected) {
     return (
@@ -32,21 +34,27 @@ export function MessageList({ conversation, isConnected }: MessageListProps) {
   if (conversation.messages.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-        {conversation.type === "private" ? (
+        {isDirect ? (
           <Lock className="h-8 w-8 text-zinc-600" strokeWidth={1.5} />
+        ) : isGroup ? (
+          <UsersRound className="h-8 w-8 text-zinc-600" strokeWidth={1.5} />
         ) : (
           <Hash className="h-8 w-8 text-zinc-600" strokeWidth={1.5} />
         )}
         <div>
           <p className="text-sm font-medium text-zinc-300">
-            {conversation.type === "private"
+            {isDirect
               ? `Message ${conversation.title}`
-              : "Public chat is quiet"}
+              : isGroup
+                ? `Say hello to ${conversation.title}`
+                : "Public chat is quiet"}
           </p>
           <p className="mt-1 text-sm text-zinc-500">
-            {conversation.type === "private"
-              ? "Send a private message to start the conversation."
-              : "Say hello to get things started."}
+            {isDirect
+              ? "Send a direct message to start the conversation."
+              : isGroup
+                ? "Messages are only delivered to this group's members."
+                : "Say hello to get things started."}
           </p>
         </div>
       </div>
@@ -61,7 +69,7 @@ export function MessageList({ conversation, isConnected }: MessageListProps) {
       aria-relevant="additions"
     >
       {conversation.messages.map((message) => (
-        <MessageBubble key={message.id} message={message} />
+        <MessageBubble key={message.id} message={message} showPrivacyIcon={isDirect} />
       ))}
     </div>
   );

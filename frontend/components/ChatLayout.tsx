@@ -3,6 +3,7 @@
 import { ConversationHeader } from "@/components/ConversationHeader";
 import { DisconnectedBanner, MessageList } from "@/components/MessageList";
 import { MessageComposer } from "@/components/MessageComposer";
+import { NewGroupModalHost } from "@/components/NewGroupModal";
 import { NicknameModalHost } from "@/components/NicknameModal";
 import { Sidebar } from "@/components/Sidebar";
 import { useChat } from "@/context/ChatProvider";
@@ -12,9 +13,11 @@ export function ChatLayout() {
   const isConnected = state.connectionStatus === "connected";
 
   const composerPlaceholder =
-    activeConversation.type === "private"
+    activeConversation.type === "direct"
       ? `Message ${activeConversation.title}…`
-      : "Message public chat…";
+      : activeConversation.type === "group"
+        ? `Message ${activeConversation.title}…`
+        : "Message public chat…";
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#070708] text-white">
@@ -52,6 +55,7 @@ export function ChatLayout() {
       </main>
 
       <NicknameModalHost />
+      <NewGroupModalHost />
     </div>
   );
 }

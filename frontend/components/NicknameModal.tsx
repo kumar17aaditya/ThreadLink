@@ -2,7 +2,7 @@
 
 import { useChat } from "@/context/ChatProvider";
 import { X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 interface NicknameModalProps {
   open: boolean;
@@ -12,20 +12,22 @@ interface NicknameModalProps {
   error?: string | null;
 }
 
-export function NicknameModal({
-  open,
+export function NicknameModal({ open, ...rest }: NicknameModalProps) {
+  if (!open) return null;
+  // Keying on currentNickname (captured at the moment the modal opens)
+  // remounts the form fresh each time it's opened, so its local `value`
+  // state naturally starts at the current nickname with no effect needed
+  // to "reset" it after the fact.
+  return <NicknameModalForm key={rest.currentNickname} {...rest} />;
+}
+
+function NicknameModalForm({
   currentNickname,
   onClose,
   onSubmit,
   error,
-}: NicknameModalProps) {
+}: Omit<NicknameModalProps, "open">) {
   const [value, setValue] = useState(currentNickname);
-
-  useEffect(() => {
-    if (open) setValue(currentNickname);
-  }, [open, currentNickname]);
-
-  if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">

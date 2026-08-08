@@ -6,9 +6,12 @@ CXXFLAGS = $(CXXSTD) $(WARNFLAGS) -pthread -Iinclude
 LDFLAGS = -pthread
 
 # Build-type-specific flags. `make` / `make release` optimize; `make debug`
-# adds symbols and sanitizers for local debugging.
+# adds symbols plus AddressSanitizer+UndefinedBehaviorSanitizer for local
+# debugging; `make tsan` builds with ThreadSanitizer instead (ASan and TSan
+# cannot be linked into the same binary, hence the separate target).
 RELEASE_FLAGS = -O2 -DNDEBUG
 DEBUG_FLAGS = -O0 -g -fsanitize=address,undefined
+TSAN_FLAGS = -O1 -g -fsanitize=thread
 
 # Shared protocol/network layer used by both server and client
 COMMON_SRC = src/Protocol.cpp
@@ -32,6 +35,10 @@ debug: CXXFLAGS += $(DEBUG_FLAGS)
 debug: LDFLAGS += -fsanitize=address,undefined
 debug: clean $(SERVER_EXE) $(CLIENT_EXE)
 
+tsan: CXXFLAGS += $(TSAN_FLAGS)
+tsan: LDFLAGS += -fsanitize=thread
+tsan: clean $(SERVER_EXE) $(CLIENT_EXE)
+
 $(SERVER_EXE): $(SERVER_OBJ)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 
@@ -44,4 +51,4 @@ $(CLIENT_EXE): $(CLIENT_OBJ)
 clean:
 	rm -f $(SERVER_EXE) $(CLIENT_EXE) $(SERVER_OBJ) $(CLIENT_OBJ)
 
-.PHONY: all clean debug release
+.PHONY: all clean debug release tsan

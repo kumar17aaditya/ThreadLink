@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useReducer,
   useRef,
@@ -194,7 +195,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(chatReducer, undefined, createInitialState);
   const clientRef = useRef<ThreadLinkClient | null>(null);
   const stateRef = useRef(state);
-  stateRef.current = state;
+  // Refs are for values read outside of rendering (event handlers, the
+  // WebSocket callbacks below); mutating one during render itself is
+  // unsafe, so sync it in an effect that runs after every commit instead.
+  useEffect(() => {
+    stateRef.current = state;
+  });
 
   const appendMessage = useCallback(
     (conversationId: string, message: Omit<Message, "id">) => {
